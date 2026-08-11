@@ -10,7 +10,7 @@ from datetime import datetime, date
 import os
 import secrets
 
-app = FastAPI(title="Lawyer Booking API", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Lawyer Booking API")
 
 # --- Security for Swagger UI ---
 security = HTTPBasic()
@@ -26,14 +26,6 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
-
-@app.get("/docs", include_in_schema=False)
-async def get_documentation(username: str = Depends(get_current_username)):
-    return get_swagger_ui_html(openapi_url="/openapi.json", title="Lawyer API - Swagger UI")
-
-@app.get("/openapi.json", include_in_schema=False)
-async def openapi(username: str = Depends(get_current_username)):
-    return get_openapi(title="Lawyer Booking API", version="1.0.0", routes=app.routes)
 # -------------------------------
 
 # Setup CORS
@@ -61,14 +53,14 @@ def get_services(active_only: bool = True):
     return response.data
 
 @app.post("/api/services", response_model=ServiceResponse)
-def create_service(service: ServiceCreate):
+def create_service(service: ServiceCreate, username: str = Depends(get_current_username)):
     response = supabase.table('services').insert(service.model_dump()).execute()
     if not response.data:
         raise HTTPException(status_code=400, detail="Failed to create service")
     return response.data[0]
 
 @app.put("/api/services/{service_id}", response_model=ServiceResponse)
-def update_service(service_id: str, service: ServiceCreate):
+def update_service(service_id: str, service: ServiceCreate, username: str = Depends(get_current_username)):
     response = supabase.table('services').update(service.model_dump()).eq('id', service_id).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Service not found")
@@ -78,7 +70,7 @@ def update_service(service_id: str, service: ServiceCreate):
 # CLIENTS
 # ==========================================
 @app.get("/api/clients")
-def get_clients():
+def get_clients(username: str = Depends(get_current_username)):
     response = supabase.table('clients').select('*').order('created_at', desc=True).execute()
     return response.data
 
@@ -129,13 +121,13 @@ def create_booking(booking: BookingCreatePublic):
     return booking_res.data[0]
 
 @app.get("/api/bookings")
-def get_bookings():
+def get_bookings(username: str = Depends(get_current_username)):
     # In Supabase, we can use foreign tables to fetch related data
     response = supabase.table('bookings').select('*, client:clients(*), service:services(*)').order('booking_date', desc=True).order('booking_time', desc=True).execute()
     return response.data
 
 @app.put("/api/bookings/{booking_id}/status")
-def update_booking_status(booking_id: str, status_update: BookingStatusUpdate):
+def update_booking_status(booking_id: str, status_update: BookingStatusUpdate, username: str = Depends(get_current_username)):
     response = supabase.table('bookings').update({"status": status_update.status}).eq('id', booking_id).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -170,7 +162,7 @@ def get_available_slots(date_str: str):
 # DASHBOARD STATS
 # ==========================================
 @app.get("/api/stats")
-def get_dashboard_stats():
+def get_dashboard_stats(username: str = Depends(get_current_username)):
     # Get total clients
     clients = supabase.table('clients').select('id', count='exact').execute()
     total_clients = clients.count
@@ -199,7 +191,7 @@ def get_settings():
     return {item['key']: item['value'] for item in response.data}
 
 @app.put("/api/settings/{key}")
-def update_setting(key: str, setting: SettingUpdate):
+def update_setting(key: str, setting: SettingUpdate, username: str = Depends(get_current_username)):
     response = supabase.table('settings').update({"value": setting.value}).eq('key', key).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Setting not found")
