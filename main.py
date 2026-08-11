@@ -17,8 +17,8 @@ security = HTTPBasic()
 
 def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
     # Default username: admin, password: lawyer2026 (change in .env later)
-    correct_username = secrets.compare_digest(credentials.username, os.getenv("ADMIN_USERNAME", "admin"))
-    correct_password = secrets.compare_digest(credentials.password, os.getenv("ADMIN_PASSWORD", "lawyer2026"))
+    correct_username = secrets.compare_digest(credentials.username, os.getenv("ADMIN_USERNAME", "Abeer"))
+    correct_password = secrets.compare_digest(credentials.password, os.getenv("ADMIN_PASSWORD", "ASKEoOEUEI#$@#$@@#@#$@#@#$_sdfjkkjsdkjmdikkdyfijdj"))
     if not (correct_username and correct_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
