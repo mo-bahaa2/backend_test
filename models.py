@@ -49,4 +49,4 @@ class BookingResponse(BaseModel):
     service: Optional[dict] = None
 
 class SettingUpdate(BaseModel):
-    value: dict
+    value: Any
