@@ -44,16 +44,18 @@ def root():
 # ==========================================
 # SERVICES
 # ==========================================
-@app.get("/api/services", response_model=List[ServiceResponse])
+@app.get("/api/services", response_model=List[ServiceResponse], summary="جلب الخدمات")
 def get_services(active_only: bool = True):
+    """يجلب قائمة بجميع الخدمات المتوفرة في النظام لكي يراها العميل"""
     query = supabase.table('services').select('*')
     if active_only:
         query = query.eq('is_active', True)
     response = query.execute()
     return response.data
 
-@app.post("/api/services", response_model=ServiceResponse)
+@app.post("/api/services", response_model=ServiceResponse, summary="إضافة خدمة جديدة")
 def create_service(service: ServiceCreate, username: str = Depends(get_current_username)):
+    """يقوم المحامي بإنشاء خدمة جديدة بالسعر والمدة الزمنية"""
     response = supabase.table('services').insert(service.model_dump()).execute()
     if not response.data:
         raise HTTPException(status_code=400, detail="Failed to create service")
@@ -69,17 +71,26 @@ def update_service(service_id: str, service: ServiceCreate, username: str = Depe
 # ==========================================
 # CLIENTS
 # ==========================================
-@app.get("/api/clients")
+@app.get("/api/clients", summary="جلب كل العملاء")
 def get_clients(username: str = Depends(get_current_username)):
+    """يجلب قائمة بجميع العملاء المسجلين في النظام، مرتبين من الأحدث للأقدم."""
     response = supabase.table('clients').select('*').order('created_at', desc=True).execute()
     return response.data
+
+@app.delete("/api/clients/{client_id}", summary="حذف عميل")
+def delete_client(client_id: str, username: str = Depends(get_current_username)):
+    """يحذف عميل معين من قاعدة البيانات بشكل نهائي."""
+    response = supabase.table('clients').delete().eq('id', client_id).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {"message": "Client deleted successfully"}
 
 # ==========================================
 # BOOKINGS
 # ==========================================
-@app.post("/api/bookings", response_model=BookingResponse)
+@app.post("/api/bookings", response_model=BookingResponse, summary="إنشاء حجز جديد")
 def create_booking(booking: BookingCreatePublic):
-    # 1. Fetch the service to get the current price
+    """الرابط الذي يستخدمه موقع العميل لإنشاء حجز جديد مع التأكد من عدم وجود تعارض"""
     service_res = supabase.table('services').select('*').eq('id', str(booking.service_id)).execute()
     if not service_res.data:
         raise HTTPException(status_code=404, detail="Service not found")
@@ -120,18 +131,27 @@ def create_booking(booking: BookingCreatePublic):
     booking_res = supabase.table('bookings').insert(new_booking).execute()
     return booking_res.data[0]
 
-@app.get("/api/bookings")
+@app.get("/api/bookings", summary="جلب كل الحجوزات")
 def get_bookings(username: str = Depends(get_current_username)):
-    # In Supabase, we can use foreign tables to fetch related data
+    """يجلب كل الحجوزات لكي يراها المحامي في لوحة التحكم"""
     response = supabase.table('bookings').select('*, client:clients(*), service:services(*)').order('booking_date', desc=True).order('booking_time', desc=True).execute()
     return response.data
 
-@app.put("/api/bookings/{booking_id}/status")
+@app.put("/api/bookings/{booking_id}/status", summary="تغيير حالة الحجز")
 def update_booking_status(booking_id: str, status_update: BookingStatusUpdate, username: str = Depends(get_current_username)):
+    """يسمح بتغيير حالة الحجز (مثلاً من pending إلى completed)"""
     response = supabase.table('bookings').update({"status": status_update.status}).eq('id', booking_id).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Booking not found")
     return response.data[0]
+
+@app.delete("/api/bookings/{booking_id}", summary="حذف حجز")
+def delete_booking(booking_id: str, username: str = Depends(get_current_username)):
+    """يحذف حجز معين من النظام تماماً."""
+    response = supabase.table('bookings').delete().eq('id', booking_id).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return {"message": "Booking deleted successfully"}
 
 @app.get("/api/bookings/available-slots")
 def get_available_slots(date_str: str):
@@ -161,9 +181,9 @@ def get_available_slots(date_str: str):
 # ==========================================
 # DASHBOARD STATS
 # ==========================================
-@app.get("/api/stats")
+@app.get("/api/stats", summary="إحصائيات لوحة التحكم")
 def get_dashboard_stats(username: str = Depends(get_current_username)):
-    # Get total clients
+    """يحسب الأرباح الكلية وعدد العملاء والحجوزات القادمة لعرضها في الشاشة الرئيسية للأدمن"""
     clients = supabase.table('clients').select('id', count='exact').execute()
     total_clients = clients.count
     
