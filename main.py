@@ -165,21 +165,36 @@ def delete_booking(booking_id: str, username: str = Depends(get_current_username
 
 @app.get("/api/bookings/available-slots")
 def get_available_slots(date_str: str):
-    # This is a simplified version. You will want to fetch standard hours from settings 
-    # and subtract the booked slots.
-    
     # 1. Get settings
-    settings_res = supabase.table('settings').select('value').eq('key', 'work_schedule').execute()
+    settings_res = supabase.table('settings').select('value').eq('key', 'working_hours').execute()
     if not settings_res.data:
-        return []
+        start_time = "10:00"
+        end_time = "18:00"
+        work_days = [1,2,3,4,5,6] # ISO 1=Mon, 6=Sat
+    else:
+        schedule = settings_res.data[0]['value']
+        start_time = schedule.get('start', '10:00')
+        end_time = schedule.get('end', '18:00')
+        work_days = schedule.get('days', [1,2,3,4,5,6])
     
-    schedule = settings_res.data[0]['value']
-    # NOTE: You'd implement the logic to generate slots between start_time and end_time
-    # For now, we return a mock array minus the booked ones
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        if dt.isoweekday() not in work_days:
+            return [] # Day is off
+    except:
+        pass
     
-    # Example generation:
-    all_slots = ["10:00:00", "11:00:00", "12:00:00", "13:00:00", "14:00:00", "15:00:00", "16:00:00"]
-    
+    # Generate slots every hour
+    all_slots = []
+    try:
+        start_h = int(start_time.split(':')[0])
+        end_h = int(end_time.split(':')[0])
+        for h in range(start_h, end_h):
+            all_slots.append(f"{h:02d}:00:00")
+            all_slots.append(f"{h:02d}:30:00") # 30 min intervals
+    except:
+        all_slots = ["10:00:00", "11:00:00", "12:00:00", "13:00:00", "14:00:00", "15:00:00", "16:00:00"]
+        
     # 2. Get booked slots for the date
     booked_res = supabase.table('bookings').select('booking_time').eq('booking_date', date_str).in_('status', ['pending', 'confirmed', 'completed']).execute()
     booked_times = [b['booking_time'] for b in booked_res.data]
