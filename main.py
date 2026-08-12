@@ -10,7 +10,7 @@ from datetime import datetime, date
 import os
 import secrets
 
-app = FastAPI(title="Lawyer Booking API")
+app = FastAPI(title="Lawyer Booking API", docs_url=None, redoc_url=None, openapi_url=None)
 
 # --- Security for Swagger UI ---
 security = HTTPBasic()
@@ -26,6 +26,16 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
+# -------------------------------
+
+# --- Secure Swagger Routes ---
+@app.get("/docs", include_in_schema=False)
+async def get_documentation(username: str = Depends(get_current_username)):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="API Documentation")
+
+@app.get("/openapi.json", include_in_schema=False)
+async def openapi(username: str = Depends(get_current_username)):
+    return get_openapi(title=app.title, version=app.version, routes=app.routes)
 # -------------------------------
 
 # Setup CORS
