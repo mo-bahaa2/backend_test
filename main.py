@@ -212,9 +212,9 @@ def get_dashboard_stats(username: str = Depends(get_current_username)):
     clients = supabase.table('clients').select('id', count='exact').execute()
     total_clients = clients.count
     
-    # Get total revenue (only completed bookings)
-    completed_bookings = supabase.table('bookings').select('price_at_booking').eq('status', 'completed').execute()
-    total_revenue = sum(float(b['price_at_booking']) for b in completed_bookings.data)
+    # Get total revenue (excluding cancelled)
+    completed_bookings = supabase.table('bookings').select('price_at_booking').in_('status', ['pending', 'confirmed', 'completed']).execute()
+    total_revenue = sum(float(b['price_at_booking'] or 0) for b in completed_bookings.data)
     
     # Get upcoming bookings
     today = str(date.today())
