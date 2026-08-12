@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+import re
 from typing import Optional, List, Any
 from datetime import date, time, datetime
 from uuid import UUID
@@ -25,6 +26,21 @@ class BookingCreatePublic(BaseModel):
     booking_date: date
     booking_time: time
     notes: Optional[str] = None
+
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v: str) -> str:
+        words = v.strip().split()
+        if len(words) < 3:
+            raise ValueError('الاسم يجب أن يكون ثلاثياً على الأقل')
+        return v.strip()
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        if not re.match(r'^(010|011|012|015)\d{8}$', v):
+            raise ValueError('رقم الهاتف يجب أن يكون رقم محمول مصري صحيح (11 رقم يبدأ بـ 010 أو 011 أو 012 أو 015)')
+        return v
 
 class BookingCreateManual(BookingCreatePublic):
     pass
