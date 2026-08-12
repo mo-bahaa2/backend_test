@@ -90,10 +90,16 @@ def get_clients(username: str = Depends(get_current_username)):
 @app.delete("/api/clients/{client_id}", summary="حذف عميل")
 def delete_client(client_id: str, username: str = Depends(get_current_username)):
     """يحذف عميل معين من قاعدة البيانات بشكل نهائي."""
-    response = supabase.table('clients').delete().eq('id', client_id).execute()
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Client not found")
-    return {"message": "Client deleted successfully"}
+    try:
+        response = supabase.table('clients').delete().eq('id', client_id).execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Client not found")
+        return {"message": "Client deleted successfully"}
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "foreign key" in error_msg or "23503" in error_msg or "violates foreign key constraint" in error_msg:
+            raise HTTPException(status_code=400, detail="لا يمكن حذف هذا العميل لوجود حجوزات سابقة مرتبطة به. يرجى حذف حجوزاته أولاً.")
+        raise HTTPException(status_code=500, detail="حدث خطأ أثناء الحذف")
 
 # ==========================================
 # BOOKINGS
