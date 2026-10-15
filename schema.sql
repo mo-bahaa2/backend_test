@@ -49,3 +49,14 @@ create table public.settings (
 insert into public.settings (key, value) values 
 ('work_schedule', '{"start_time": "10:00", "end_time": "18:00", "slot_duration_minutes": 30, "off_days": [5, 6]}'), -- 5=Friday, 6=Saturday
 ('contact_info', '{"phone": "01000000000", "email": "info@lawyer.com", "address": "القاهرة، مصر"}');
+
+-- 5. Contact Messages Table (رسائل واستفسارات الموقع)
+create table if not exists public.messages (
+    id uuid default uuid_generate_v4() primary key,
+    name text not null,
+    phone text not null,
+    subject text not null,
+    message text not null,
+    is_read boolean not null default false,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);

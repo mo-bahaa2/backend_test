@@ -9,6 +9,8 @@ from typing import List
 from datetime import datetime, date
 import os
 import secrets
+import uuid
+import json
 
 app = FastAPI(title="Lawyer Booking API", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -247,3 +249,137 @@ def update_setting(key: str, setting: SettingUpdate, username: str = Depends(get
     if not response.data:
         raise HTTPException(status_code=404, detail="Setting not found")
     return response.data[0]
+
+# ==========================================
+# CONTACT MESSAGES (الرسائل والاستفسارات)
+# ==========================================
+LOCAL_MESSAGES_FILE = os.path.join(os.path.dirname(__file__), "messages_store.json")
+
+def _read_local_messages() -> list:
+    if os.path.exists(LOCAL_MESSAGES_FILE):
+        try:
+            with open(LOCAL_MESSAGES_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def _write_local_messages(msgs: list) -> None:
+    try:
+        with open(LOCAL_MESSAGES_FILE, "w", encoding="utf-8") as f:
+            json.dump(msgs, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+@app.post("/api/messages", summary="إرسال استفسار جديد")
+def create_message(msg: MessageCreate):
+    new_id = str(uuid.uuid4())
+    now_iso = datetime.utcnow().isoformat()
+    record = {
+        "id": new_id,
+        "name": msg.name,
+        "phone": msg.phone,
+        "subject": msg.subject,
+        "message": msg.message,
+        "is_read": False,
+        "created_at": now_iso
+    }
+
+    # 1. Try Supabase messages table
+    try:
+        res = supabase.table('messages').insert(record).execute()
+        if res.data:
+            return {"message": "تم إرسال رسالتك بنجاح", "id": new_id}
+    except Exception:
+        pass
+
+    # 2. Try Supabase settings table (contact_messages)
+    try:
+        settings_res = supabase.table('settings').select('value').eq('key', 'contact_messages').execute()
+        current_list = settings_res.data[0]['value'] if settings_res.data else []
+        current_list.insert(0, record)
+        if settings_res.data:
+            supabase.table('settings').update({'value': current_list}).eq('key', 'contact_messages').execute()
+        else:
+            supabase.table('settings').insert({'key': 'contact_messages', 'value': current_list}).execute()
+        return {"message": "تم إرسال رسالتك بنجاح", "id": new_id}
+    except Exception:
+        pass
+
+    # 3. Fallback to local file store
+    msgs = _read_local_messages()
+    msgs.insert(0, record)
+    _write_local_messages(msgs)
+    return {"message": "تم إرسال رسالتك بنجاح", "id": new_id}
+
+@app.get("/api/messages", summary="جلب جميع الرسائل")
+def get_messages(username: str = Depends(get_current_username)):
+    # 1. Try Supabase messages table
+    try:
+        res = supabase.table('messages').select('*').order('created_at', desc=True).execute()
+        if res.data is not None and len(res.data) > 0:
+            return res.data
+    except Exception:
+        pass
+
+    # 2. Try Supabase settings
+    try:
+        settings_res = supabase.table('settings').select('value').eq('key', 'contact_messages').execute()
+        if settings_res.data and settings_res.data[0]['value']:
+            return settings_res.data[0]['value']
+    except Exception:
+        pass
+
+    # 3. Fallback to local
+    return _read_local_messages()
+
+@app.patch("/api/messages/{message_id}/read", summary="تحديث حالة القراءة")
+def toggle_message_read(message_id: str, is_read: bool = True, username: str = Depends(get_current_username)):
+    # 1. Try Supabase messages
+    try:
+        supabase.table('messages').update({'is_read': is_read}).eq('id', message_id).execute()
+    except Exception:
+        pass
+
+    # 2. Try Supabase settings
+    try:
+        settings_res = supabase.table('settings').select('value').eq('key', 'contact_messages').execute()
+        if settings_res.data:
+            msgs = settings_res.data[0]['value']
+            for m in msgs:
+                if m.get('id') == message_id:
+                    m['is_read'] = is_read
+            supabase.table('settings').update({'value': msgs}).eq('key', 'contact_messages').execute()
+    except Exception:
+        pass
+
+    # 3. Local fallback
+    msgs = _read_local_messages()
+    for m in msgs:
+        if m.get('id') == message_id:
+            m['is_read'] = is_read
+    _write_local_messages(msgs)
+    return {"message": "تم التحديث بنجاح"}
+
+@app.delete("/api/messages/{message_id}", summary="حذف رسالة")
+def delete_message(message_id: str, username: str = Depends(get_current_username)):
+    # 1. Try Supabase messages
+    try:
+        supabase.table('messages').delete().eq('id', message_id).execute()
+    except Exception:
+        pass
+
+    # 2. Try Supabase settings
+    try:
+        settings_res = supabase.table('settings').select('value').eq('key', 'contact_messages').execute()
+        if settings_res.data:
+            msgs = [m for m in settings_res.data[0]['value'] if m.get('id') != message_id]
+            supabase.table('settings').update({'value': msgs}).eq('key', 'contact_messages').execute()
+    except Exception:
+        pass
+
+    # 3. Local fallback
+    msgs = [m for m in _read_local_messages() if m.get('id') != message_id]
+    _write_local_messages(msgs)
+    return {"message": "تم حذف الرسالة بنجاح"}
+
