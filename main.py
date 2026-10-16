@@ -5,7 +5,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from database import supabase
 from models import *
-from typing import List
+from typing import List, Optional
 from datetime import datetime, date
 import os
 import secrets
@@ -116,10 +116,29 @@ def create_booking(booking: BookingCreatePublic):
     service_data = service_res.data[0]
     current_price = service_data['price']
 
-    # 2. Check for double booking (Race condition prevention)
-    existing = supabase.table('bookings').select('id').eq('booking_date', str(booking.booking_date)).eq('booking_time', str(booking.booking_time)).in_('status', ['pending', 'confirmed', 'completed']).execute()
-    if existing.data:
-        raise HTTPException(status_code=400, detail="هذا الموعد تم حجزه للتو، برجاء اختيار موعد آخر")
+    # 2. Check for double booking / overlapping booking
+    req_time_str = str(booking.booking_time)
+    req_parts = req_time_str.split(':')
+    req_start = int(req_parts[0]) * 60 + int(req_parts[1])
+    req_dur = int(service_data.get('duration_minutes', 30))
+    req_end = req_start + req_dur
+
+    existing_bookings = supabase.table('bookings')\
+        .select('booking_time, service:services(duration_minutes)')\
+        .eq('booking_date', str(booking.booking_date))\
+        .in_('status', ['pending', 'confirmed', 'completed'])\
+        .execute()
+
+    for eb in (existing_bookings.data or []):
+        eb_time_parts = str(eb['booking_time']).split(':')
+        eb_start = int(eb_time_parts[0]) * 60 + int(eb_time_parts[1])
+        eb_dur = 30
+        if eb.get('service') and isinstance(eb['service'], dict) and eb['service'].get('duration_minutes'):
+            eb_dur = int(eb['service']['duration_minutes'])
+        eb_end = eb_start + eb_dur
+
+        if max(req_start, eb_start) < min(req_end, eb_end):
+            raise HTTPException(status_code=400, detail="هذا الموعد يتعارض مع حجز قائم، برجاء اختيار موعد آخر")
 
     # 3. Find or create client by phone
     client_res = supabase.table('clients').select('*').eq('phone', booking.phone).execute()
@@ -172,7 +191,7 @@ def delete_booking(booking_id: str, username: str = Depends(get_current_username
     return {"message": "Booking deleted successfully"}
 
 @app.get("/api/bookings/available-slots")
-def get_available_slots(date_str: str):
+def get_available_slots(date_str: str, service_id: Optional[str] = None):
     # 1. Get settings
     settings_res = supabase.table('settings').select('value').eq('key', 'working_hours').execute()
     if not settings_res.data:
@@ -191,24 +210,75 @@ def get_available_slots(date_str: str):
             return [] # Day is off
     except:
         pass
-    
-    # Generate slots every hour
-    all_slots = []
+
+    # 2. Determine requested service duration (default to 30 mins)
+    duration_minutes = 30
+    if service_id:
+        try:
+            s_res = supabase.table('services').select('duration_minutes').eq('id', service_id).execute()
+            if s_res.data and s_res.data[0].get('duration_minutes'):
+                duration_minutes = int(s_res.data[0]['duration_minutes'])
+        except Exception as e:
+            print("Error fetching service duration:", e)
+
+    # Helper functions to convert between time string and minutes from midnight
+    def time_to_minutes(t_str: str) -> int:
+        parts = str(t_str).split(':')
+        return int(parts[0]) * 60 + int(parts[1])
+
+    def minutes_to_timestr(mins: int) -> str:
+        h = mins // 60
+        m = mins % 60
+        return f"{h:02d}:{m:02d}:00"
+
     try:
-        start_h = int(start_time.split(':')[0])
-        end_h = int(end_time.split(':')[0])
-        for h in range(start_h, end_h):
-            all_slots.append(f"{h:02d}:00:00")
-            all_slots.append(f"{h:02d}:30:00") # 30 min intervals
+        start_min = time_to_minutes(start_time)
+        end_min = time_to_minutes(end_time)
     except:
-        all_slots = ["10:00:00", "11:00:00", "12:00:00", "13:00:00", "14:00:00", "15:00:00", "16:00:00"]
-        
-    # 2. Get booked slots for the date
-    booked_res = supabase.table('bookings').select('booking_time').eq('booking_date', date_str).in_('status', ['pending', 'confirmed', 'completed']).execute()
-    booked_times = [b['booking_time'] for b in booked_res.data]
-    
-    available_slots = [slot for slot in all_slots if slot not in booked_times]
-    
+        start_min = 10 * 60
+        end_min = 18 * 60
+
+    # 3. Get booked slots for the date with service durations
+    booked_res = supabase.table('bookings')\
+        .select('booking_time, service:services(duration_minutes)')\
+        .eq('booking_date', date_str)\
+        .in_('status', ['pending', 'confirmed', 'completed'])\
+        .execute()
+
+    occupied_ranges = []
+    for b in (booked_res.data or []):
+        try:
+            b_start = time_to_minutes(b['booking_time'])
+            b_dur = 30
+            if b.get('service') and isinstance(b['service'], dict) and b['service'].get('duration_minutes'):
+                b_dur = int(b['service']['duration_minutes'])
+            b_end = b_start + b_dur
+            occupied_ranges.append((b_start, b_end))
+        except Exception as err:
+            print("Error parsing booked time range:", err)
+
+    # 4. Generate candidate slots in 15-minute steps
+    # 15 minutes allows flexible chaining of 15, 30, 45, 60 min appointments
+    step_minutes = 15
+    available_slots = []
+
+    current_min = start_min
+    while current_min + duration_minutes <= end_min:
+        slot_start = current_min
+        slot_end = current_min + duration_minutes
+
+        # Check for overlap: max(A, C) < min(B, D)
+        has_conflict = False
+        for (occ_start, occ_end) in occupied_ranges:
+            if max(slot_start, occ_start) < min(slot_end, occ_end):
+                has_conflict = True
+                break
+
+        if not has_conflict:
+            available_slots.append(minutes_to_timestr(slot_start))
+
+        current_min += step_minutes
+
     return available_slots
 
 # ==========================================
