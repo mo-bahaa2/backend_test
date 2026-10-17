@@ -26,6 +26,16 @@ class BookingCreatePublic(BaseModel):
     booking_date: date
     booking_time: time
     notes: Optional[str] = None
+    case_type: Optional[str] = "مدني"
+
+    @field_validator('case_type')
+    @classmethod
+    def validate_case_type(cls, v: Optional[str]) -> Optional[str]:
+        if v:
+            allowed = ['جنائي', 'مدني', 'أسرة', 'قضاء إداري']
+            if v not in allowed:
+                raise ValueError(f'نوع القضية يجب أن يكون أحد الخيارات التالية: {", ".join(allowed)}')
+        return v
 
     @field_validator('full_name')
     @classmethod
@@ -59,6 +69,7 @@ class BookingResponse(BaseModel):
     notes: Optional[str]
     source: str
     created_at: datetime
+    case_type: Optional[str] = None
     
     # Relationships for convenience
     client: Optional[dict] = None

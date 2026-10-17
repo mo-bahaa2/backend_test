@@ -34,9 +34,13 @@ create table public.bookings (
     status booking_status default 'pending' not null,
     price_at_booking numeric(10, 2) not null,
     notes text,
+    case_type text default 'مدني',
     source booking_source default 'online' not null,
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- Migration for existing database:
+alter table if exists public.bookings add column if not exists case_type text;
 
 -- 4. Settings Table
 create table public.settings (

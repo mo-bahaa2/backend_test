@@ -162,17 +162,41 @@ def create_booking(booking: BookingCreatePublic):
         "booking_time": str(booking.booking_time),
         "price_at_booking": current_price,
         "notes": booking.notes,
-        "source": "online" # or manual if requested from admin
+        "source": "online",
+        "case_type": booking.case_type
     }
     
-    booking_res = supabase.table('bookings').insert(new_booking).execute()
-    return booking_res.data[0]
+    try:
+        booking_res = supabase.table('bookings').insert(new_booking).execute()
+        return booking_res.data[0]
+    except Exception as e:
+        # Fallback if case_type column is not yet migrated in Supabase table
+        if "case_type" in str(e).lower():
+            del new_booking["case_type"]
+            prefix = f"[نوع القضية: {booking.case_type}]" if booking.case_type else ""
+            if prefix:
+                new_booking["notes"] = f"{prefix}\n{booking.notes}" if booking.notes else prefix
+            booking_res = supabase.table('bookings').insert(new_booking).execute()
+            data = booking_res.data[0]
+            data["case_type"] = booking.case_type
+            return data
+        raise e
 
 @app.get("/api/bookings", summary="جلب كل الحجوزات")
 def get_bookings(username: str = Depends(get_current_username)):
     """يجلب كل الحجوزات لكي يراها المحامي في لوحة التحكم"""
     response = supabase.table('bookings').select('*, client:clients(*), service:services(*)').order('booking_date', desc=True).order('booking_time', desc=True).execute()
-    return response.data
+    data = response.data or []
+    for b in data:
+        # If case_type column does not exist or is empty, extract from notes if present
+        if not b.get('case_type') and b.get('notes') and '[نوع القضية:' in b.get('notes'):
+            try:
+                m = re.search(r'\[نوع القضية:\s*([^\]]+)\]', b['notes'])
+                if m:
+                    b['case_type'] = m.group(1).strip()
+            except Exception:
+                pass
+    return data
 
 @app.put("/api/bookings/{booking_id}/status", summary="تغيير حالة الحجز")
 def update_booking_status(booking_id: str, status_update: BookingStatusUpdate, username: str = Depends(get_current_username)):
